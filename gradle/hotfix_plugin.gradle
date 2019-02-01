@@ -1,0 +1,145 @@
+import groovy.xml.Namespace
+import groovy.xml.QName
+
+def TINKER_VERSION = '1.7.6'
+def TINKER_GRADLE_PLUGIN = "com.tencent.tinker:tinker-patch-gradle-plugin:${TINKER_VERSION}"
+def TINKER_DEPENDENT = "com.tencent.tinker:tinker-android-lib:${TINKER_VERSION}"
+
+/*rootProject.beforeEvaluate {
+    rootProject.buildscript.dependencies. {
+        classpath "${TINKER_GRADLE_PLUGIN}"
+    }
+}*/
+/*gradle.beforeProject {
+    gradle.buildscript.dependencies {
+        classpath "${TINKER_GRADLE_PLUGIN}"
+    }
+}*/
+
+/*rootProject.buildscript
+
+
+    buildscript {
+        repositories {
+            mavenLocal()
+            jcenter()
+        }
+        dependencies {
+            classpath "com.tencent.tinker:tinker-patch-gradle-plugin:1.7.6"
+        }
+    }
+
+apply plugin: 'com.tencent.tinker.patch'
+
+//apply from: '../gradle/tinker_patch.gradle'*/
+
+// 定义属性类
+class HotfixPatchExtension {
+}
+
+// 定义gradle task, 用于修改Manifest文件
+class HotfixManifestTask extends DefaultTask {
+    static final String TAG = 'hotfix.HotfixManifestTask'
+    static final String MATA_KEY_ORIGINAL_APPLICATION_NAME = "TINKER_PATCH_APPLICATION";
+    static
+    final String DEFALUT_APPLICATION_CLASS_NAME = "com.eebbk.bfc.hotfix.tinker.TinkerPatchReflectApplication"
+
+    String manifestPath
+
+    HotfixManifestTask() {
+        group = 'hotfix'
+    }
+
+    def log(String msg) {
+        project.logger.error("${TAG}>>> ${msg}")
+    }
+
+
+    @TaskAction
+    def modifyManifestMeta() {
+        Node xml = new XmlParser().parse(new InputStreamReader(new FileInputStream(manifestPath), "utf-8"))
+        Node applicationNode = xml.application[0]
+
+        if (applicationNode) {
+            // 1. 获取原始Application的名称
+            QName nameAttr = new QName("http://schemas.android.com/apk/res/android", 'name', 'android');
+            def applicationName = applicationNode.attribute(nameAttr)
+            if (applicationName == null || applicationName.isEmpty()) {
+                applicationName = "android.app.Application"
+            }
+
+            log("original application class name: ${applicationName}")
+
+            // 2. 将Application的名称, 替换成指定的名称
+            applicationNode.attributes().put(nameAttr, DEFALUT_APPLICATION_CLASS_NAME)
+
+            log("manifest application name modified")
+
+            // 3. 将原先的application名称加入meta-data, 方便调用
+            Namespace ns = new Namespace("http://schemas.android.com/apk/res/android", "android")
+            def metaDatas = applicationNode["meta-data"]
+
+            def tinkerId = metaDatas.findAll {
+                it.attributes()[ns.name].equals(MATA_KEY_ORIGINAL_APPLICATION_NAME)
+            }.each {
+                it.parent().remove(it)
+            }
+
+            applicationNode.appendNode('meta-data', [(ns.name): MATA_KEY_ORIGINAL_APPLICATION_NAME, (ns.value): applicationName])
+
+            log("manifest meta-data modified")
+
+            // 4. 重新输出
+            XmlNodePrinter printer = new XmlNodePrinter(new PrintWriter(manifestPath, 'utf-8'))
+            printer.preserveWhitespace = true
+            printer.print(xml)
+
+            log("manifest modify success!!")
+        }
+    }
+}
+
+
+class HotfixBuildPatchTask extends DefaultTask{
+    HotfixBuildPatchTask(){
+        group = 'hotfix'
+    }
+
+
+}
+
+// 添加gradletask开始,  应该做成插件的, 先用脚本, 方便调试
+
+project.extensions.create("hotfixPatch", HotfixPatchExtension)
+
+if (!project.plugins.hasPlugin('com.android.application')) {
+    throw new GradleException("${TAG}: Android Application plugin required")
+}
+
+
+project.afterEvaluate({
+    def conguration = project.hotfixPatch
+
+    def taskGroupName = 'hotfix'
+
+//    AppExtension android = project.extensions.android
+    def android = project.extensions.android
+
+    project.logger.error(": ----------------Hotfix build configuration start---------------------")
+
+    android.applicationVariants.all { variant ->
+        def variantOutput = variant.outputs.first()
+        def variantName = variant.name.capitalize()
+
+        HotfixManifestTask manifestTask = project.tasks.create("hotfixProcess${variantName}Manifest", HotfixManifestTask)
+        manifestTask.manifestPath = variantOutput.processManifest.manifestOutputFile
+
+        manifestTask.mustRunAfter variantOutput.processManifest
+        variantOutput.processResources.dependsOn manifestTask
+
+
+        Task buildPatchTask = project.tasks.create([name:"hotfixBuild${variantName}Patch", group: taskGroupName]){}
+        buildPatchTask.dependsOn "tinkerPatch${variantName}"
+    }
+
+})

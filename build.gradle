@@ -1,0 +1,30 @@
+apply from: "http://172.28.2.93/bfc/Bfc/raw/develop/common-config/bfc-config.gradle"
+apply from: "./config.gradle"
+buildscript {
+    repositories {
+        maven { url 'http://repo2.maven.org/maven2/' }
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:2.2.3'
+        classpath "com.tencent.tinker:tinker-patch-gradle-plugin:1.7.6"
+    }
+}
+
+subprojects { project ->
+    repositories {
+        maven { url 'http://repo2.maven.org/maven2/' }
+        jcenter()
+
+        // 增加私有Maven快照仓库
+        maven { url bfcBuildConfig.MAVEN_SNAPSHOT_URL }
+        // 增加私有Maven正式发布仓库
+        maven { url bfcBuildConfig.MAVEN_URL }
+        // 灰度版本仓库
+        maven { url bfcBuildConfig.MAVEN_RC_URL }
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
